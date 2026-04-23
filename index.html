@@ -93,6 +93,15 @@ select.fi option{background:var(--bg2)}
 .unlock-wrap{background:var(--bg2);border:1px solid rgba(139,92,246,.2);border-radius:16px;padding:1.8rem;margin-top:1rem;text-align:center;display:none}
 .unlock-wrap h3{font-family:'Syne',sans-serif;font-size:1.1rem;font-weight:700;margin-bottom:.4rem}
 .unlock-wrap p{font-size:.84rem;color:var(--muted2);margin-bottom:1.2rem;font-weight:300}
+.pay-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;max-width:480px;margin:0 auto 1rem}
+.pay-opt{background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:.85rem .7rem;cursor:pointer;transition:all .18s;text-align:center}
+.pay-opt:hover{border-color:var(--accent)}
+.pay-opt.pw-annual{border-color:rgba(240,180,41,.45);background:rgba(240,180,41,.06)}
+.pay-opt.pw-monthly{border-color:rgba(139,92,246,.35)}
+.pay-opt.pw-session{opacity:.85}
+.pw-badge{font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#f0b429;margin-bottom:.25rem}
+.pay-price{font-family:'Syne',sans-serif;font-size:1.05rem;font-weight:800;color:var(--accent)}
+.pay-label{font-size:.68rem;color:var(--muted2);margin-top:3px}
 .pay-email{width:100%;max-width:380px;margin:0 auto .8rem;display:block;padding:.65rem .9rem;background:var(--bg3);border:1px solid var(--border);border-radius:10px;font-family:'Instrument Sans',sans-serif;font-size:.9rem;color:var(--text);outline:none}
 .pay-email:focus{border-color:var(--accent)}
 .btn-unlock{font-family:'Syne',sans-serif;font-weight:700;font-size:.95rem;padding:.8rem 2.5rem;border-radius:100px;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .2s;display:inline-flex;align-items:center;gap:.4rem}
@@ -214,6 +223,7 @@ footer a{color:var(--accent2);text-decoration:none}
       <input type="text" class="fi" id="f-avoid" placeholder="e.g. avoid my last name, don't use 'solutions', nothing too corporate">
     </div>
     <button class="btn btn-p" id="gen-btn" onclick="generate()">Generate Business Names →</button>
+    <div id="gen-error" style="display:none;margin-top:.8rem;padding:.7rem 1rem;background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.25);border-radius:10px;font-size:.82rem;color:#ff6b6b;">Something went wrong generating names. Please try again in a moment.</div>
   </div>
 
   <div class="loading" id="loading">
@@ -230,10 +240,14 @@ footer a{color:var(--accent2);text-decoration:none}
 
     <div class="unlock-wrap" id="unlock-wrap">
       <h3>Unlock all 15 names + taglines</h3>
-      <p>You're seeing 5 of 15 generated names. Pay $2.99 to reveal all 15 — including the ones we think are the strongest.</p>
+      <p>One subscription covers <em>all</em> Infinity Hub tools — or grab a 24-hour pass.</p>
       <input type="email" class="pay-email" id="pay-email" placeholder="Your email address">
-      <button class="btn-unlock" onclick="handlePay()">Unlock all 15 — $2.99 →</button>
-      <p style="font-size:.7rem;color:var(--muted);margin-top:.7rem">Secured by Square · One-time payment · No subscription</p>
+      <div class="pay-grid">
+        <div class="pay-opt pw-annual" onclick="handlePay('annual')"><div class="pw-badge">Best Value</div><div class="pay-price">$99/yr</div><div class="pay-label">Annual · save 31%</div></div>
+        <div class="pay-opt pw-monthly" onclick="handlePay('monthly')"><div class="pay-price">$12/mo</div><div class="pay-label">Monthly</div></div>
+        <div class="pay-opt pw-session" onclick="handlePay('session')"><div class="pay-price">$0.99</div><div class="pay-label">24-hr pass</div></div>
+      </div>
+      <p style="font-size:.7rem;color:var(--muted);margin-top:.3rem">Secured by Square · Cancel anytime</p>
     </div>
 
     <div style="margin-top:1rem;display:flex;gap:8px">
@@ -271,7 +285,10 @@ footer a{color:var(--accent2);text-decoration:none}
 
 <script>
 const WORKER_URL = 'https://justdocs-worker.robertjosephreynolds.workers.dev';
-const APP_NAME   = 'nameai';
+const APP_NAME          = 'nameai';
+const APP_URL           = 'https://contactinfinitysolutionsllc-ops.github.io/nameai/';
+const SQUARE_MONTHLY_URL = 'https://square.link/u/pCpKBYg8'; // replace with Square monthly plan link once created
+const SQUARE_ANNUAL_URL  = 'https://square.link/u/zRrTqrz3'; // replace with Square annual plan link once created
 let allNames = [];
 let favorites = new Set();
 let unlocked = false;
@@ -317,15 +334,18 @@ Rules:
 - Make the strongest names come first`;
 
   document.getElementById('names-wrap').style.display='none';
+  document.getElementById('gen-error').style.display='none';
   document.getElementById('loading').style.display='block';
   document.getElementById('gen-btn').disabled=true;
-
   try{
     const r=await fetch(WORKER_URL,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'claude',prompt})});
+      body:JSON.stringify({action:'claude',prompt,email:getStoredSession()?.email||localStorage.getItem('ig_account_email')||''})});
     const data=await r.json();
-    parseAndShow(data.result||'');
-  }catch{alert('Error generating names. Please try again.');}
+    if(!data.result){throw new Error('Empty response');}
+    parseAndShow(data.result);
+  }catch{
+    document.getElementById('gen-error').style.display='block';
+  }
 
   document.getElementById('loading').style.display='none';
   document.getElementById('gen-btn').disabled=false;
@@ -336,7 +356,8 @@ function parseAndShow(raw){
   allNames=blocks.map(block=>{
     const nameM=block.match(/NAME:\s*(.+)/i);
     const tagM=block.match(/TAGLINE:\s*(.+)/i);
-    const whyM=block.match(/WHY:\s*(.+)/i);
+    // WHY and DOMAIN can span multiple lines — capture until the next label
+    const whyM=block.match(/WHY:\s*([\s\S]+?)(?=\n(?:DOMAIN|STYLE|NAME|TAGLINE):|$)/i);
     const domM=block.match(/DOMAIN:\s*(.+)/i);
     const styleM=block.match(/STYLE:\s*(.+)/i);
     return{
@@ -347,6 +368,13 @@ function parseAndShow(raw){
       style:styleM?styleM[1].trim():'',
     };
   }).filter(n=>n.name.length>1);
+
+  if(!allNames.length){
+    document.getElementById('gen-error').style.display='block';
+    document.getElementById('loading').style.display='none';
+    document.getElementById('gen-btn').disabled=false;
+    return;
+  }
 
   renderNames(unlocked);
   document.getElementById('names-wrap').style.display='block';
@@ -382,9 +410,10 @@ function buildNameCard(n,i,locked){
     <div class="name-tagline">"${n.tagline}"</div>
     <div class="name-why">${n.why}</div>
     <div class="name-meta">
-      ${n.domain?`<span class="name-tag domain">🌐 ${n.domain}</span>`:''}
+      ${n.domain?`<span class="name-tag domain" title="Check availability before registering">🌐 ${n.domain}</span>`:''}
       ${n.style?`<span class="name-tag">${n.style}</span>`:''}
     </div>
+    <div style="font-size:.68rem;color:var(--muted);margin-top:.4rem">Domain availability not guaranteed — verify before registering.</div>
     <div class="name-actions">
       <button class="btn-fav" id="fav-${i}" onclick="toggleFav(${i},'${n.name.replace(/'/g,"\\'")}')">☆ Save</button>
       <button class="btn-fav" onclick="copyName(${i})">📋 Copy</button>
@@ -423,13 +452,18 @@ function resetForm(){
   window.scrollTo({top:0,behavior:'smooth'});
 }
 
-async function handlePay(){
+async function handlePay(plan){
   const email=document.getElementById('pay-email').value.trim();
   if(!email||!email.includes('@')){alert('Please enter your email first.');return;}
   localStorage.setItem('nameai_pending_email',email);
+  localStorage.setItem('nameai_pending_plan',plan);
+  if(plan==='annual'&&SQUARE_ANNUAL_URL){window.location.href=SQUARE_ANNUAL_URL;return;}
+  if(plan==='monthly'&&SQUARE_MONTHLY_URL){window.location.href=SQUARE_MONTHLY_URL;return;}
+  const amounts={annual:99,monthly:12,session:0.99};
+  const labels={annual:'Infinity Hub – Annual',monthly:'Infinity Hub – Monthly',session:'Infinity Hub – Session Pass'};
   const r=await fetch(WORKER_URL,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({action:'createPaymentLink',docType:'NameAI – Full Name List',amount:2.99,
-      redirectUrl:'https://contactinfinitysolutionsllc-ops.github.io/nameai/?paid=true'})});
+    body:JSON.stringify({action:'createPaymentLink',docType:labels[plan],amount:amounts[plan],
+      redirectUrl:APP_URL+'?paid=true&plan='+plan})});
   const data=await r.json();
   if(data.url) window.location.href=data.url;
   else alert('Could not create payment link. Please try again.');
@@ -437,11 +471,14 @@ async function handlePay(){
 
 if(window.location.search.includes('paid=true')){
   const email=localStorage.getItem('nameai_pending_email');
+  const plan=new URLSearchParams(window.location.search).get('plan')
+            ||localStorage.getItem('nameai_pending_plan')||'session';
   const saved=localStorage.getItem('nameai_results');
   if(email){
     fetch(WORKER_URL,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'addSubscriber',email,app:APP_NAME})});
+      body:JSON.stringify({action:'addSubscriber',email,app:APP_NAME,plan})});
     localStorage.removeItem('nameai_pending_email');
+    localStorage.removeItem('nameai_pending_plan');
   }
   if(saved){
     allNames=JSON.parse(saved);
@@ -530,6 +567,5 @@ function showSignInBar() {
   }
 })();
 </script>
-<script src="https://contactinfinitysolutionsllc-ops.github.io/account/ig-account.js"></script>
 </body>
 </html>
